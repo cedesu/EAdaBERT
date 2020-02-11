@@ -37,8 +37,8 @@ from sklearn.metrics import matthews_corrcoef, f1_score
 
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.modeling_ori_dis import BertForSequenceClassification, BertConfig, WEIGHTS_NAME, CONFIG_NAME
-import pytorch_pretrained_bert.modeling_fast_dis as modeling_fast
-#import pytorch_pretrained_bert.modeling_both as modeling_fast
+#import pytorch_pretrained_bert.modeling_fast_dis as modeling_fast
+import pytorch_pretrained_bert.modeling_both as modeling_fast
 from pytorch_pretrained_bert.tokenization import BertTokenizer
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 
@@ -711,8 +711,8 @@ def do_sparse(w, ratio, param_tensor, model):
 def svd(mat, rank):
     U, sigma, VT = np.linalg.svd(mat)
     diag = np.sqrt(np.diag(sigma[:rank]))
-    return torch.nn.Parameter(torch.from_numpy(np.matmul(U[:, :rank], diag)[:,:184]).float().cuda()), torch.nn.Parameter(
-        torch.from_numpy(np.matmul(diag, VT[:rank, :])[:184,:]).float().cuda())
+    return torch.nn.Parameter(torch.from_numpy(np.matmul(U[:, :rank], diag)).float().cuda()), torch.nn.Parameter(
+        torch.from_numpy(np.matmul(diag, VT[:rank, :])).float().cuda())
 
 
 class prune_function:
@@ -864,7 +864,7 @@ class prune_function:
 
         if args.bert_model == 'bert-base-uncased':
             layer_num = 12  # others not implemented
-            old_dim = 768
+            new_dim = 256
 
         if args.svd_weight_dir is None:
             cache_dir = args.cache_dir if args.cache_dir else os.path.join(str(PYTORCH_PRETRAINED_BERT_CACHE),
@@ -874,15 +874,15 @@ class prune_function:
                                                                                 num_labels=num_labels)
             for i in range(layer_num):
                 pt = model.bert.encoder.layer[i].attention.self
-                pt.qmat1, pt.qmat2 = svd(pt.query.weight.detach().cpu().numpy(), old_dim)
-                pt.kmat1, pt.kmat2 = svd(pt.key.weight.detach().cpu().numpy(), old_dim)
-                pt.vmat1, pt.vmat2 = svd(pt.value.weight.detach().cpu().numpy(), old_dim)
+                pt.qmat1, pt.qmat2 = svd(pt.query.weight.detach().cpu().numpy(), new_dim)
+                pt.kmat1, pt.kmat2 = svd(pt.key.weight.detach().cpu().numpy(), new_dim)
+                pt.vmat1, pt.vmat2 = svd(pt.value.weight.detach().cpu().numpy(), new_dim)
                 pt = model.bert.encoder.layer[i].attention.output
-                pt.dmat1, pt.dmat2 = svd(pt.dense.weight.detach().cpu().numpy(), old_dim)
+                pt.dmat1, pt.dmat2 = svd(pt.dense.weight.detach().cpu().numpy(), new_dim)
                 pt = model.bert.encoder.layer[i].intermediate
-                pt.dmat1, pt.dmat2 = svd(pt.dense.weight.detach().cpu().numpy(), old_dim)
+                pt.dmat1, pt.dmat2 = svd(pt.dense.weight.detach().cpu().numpy(), new_dim)
                 pt = model.bert.encoder.layer[i].output
-                pt.dmat1, pt.dmat2 = svd(pt.dense.weight.detach().cpu().numpy(), old_dim)
+                pt.dmat1, pt.dmat2 = svd(pt.dense.weight.detach().cpu().numpy(), new_dim)
                 print('init weight finish')
 
             model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
@@ -907,9 +907,6 @@ class prune_function:
                 output_config_file = os.path.join(svd_weight, CONFIG_NAME)
                 if args.cont_model!='':
                     output_model_file=os.path.join(args.cont_model, WEIGHTS_NAME)
-            '''else:
-                output_model_file = os.path.join('/home/yujwang/maoyh/svd_weight_large', WEIGHTS_NAME)
-                output_config_file = os.path.join('/home/yujwang/maoyh/svd_weight_large', CONFIG_NAME)'''
             config = modeling_fast.BertConfig(output_config_file)
             model = modeling_fast.BertForSequenceClassification(config, num_labels=num_labels)
             model.load_state_dict(torch.load(output_model_file), strict=False)
@@ -933,7 +930,7 @@ class prune_function:
         self.n_gpu = n_gpu
 
         # model_t
-        distill_weight = args.distill_dir  # '/home/yujwang/maoyh/sst_distill_weight'
+        distill_weight = args.distill_dir
         distill_weight_file = os.path.join(distill_weight, WEIGHTS_NAME)
         config = BertConfig(output_config_file)
         model_t = BertForSequenceClassification(config, num_labels=num_labels)
@@ -1438,7 +1435,7 @@ def main():
     parser.add_argument("--svd_weight_dir",
                         default=None,
                         type=str,
-                        help="Here it's /home/yujwang/maoyh/svd_weight. By default for sst-2 there're 3 categories. For MNLI, it's /home/yujwang/maoyh/svd_weight_2, 2 categories.")
+                        help="SVD version model directory")
     parser.add_argument("--svd_ratio",
                         default=18,
                         type=int,
